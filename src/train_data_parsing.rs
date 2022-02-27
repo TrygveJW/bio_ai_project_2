@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-
 use std::fs;
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct Depot{
