@@ -32,6 +32,7 @@ struct TrainSet {
     travel_times: Vec<Vec<f32>>,
 }
 
+#[derive(Debug)]
 pub struct PatientPruned {
     pub travel_index: usize,
     pub care_time: i32,
@@ -40,6 +41,7 @@ pub struct PatientPruned {
     pub start_time: i32,
 }
 
+#[derive(Debug)]
 pub struct EnvPruned {
     pub set_name: String,
     pub number_nurses: i32,

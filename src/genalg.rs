@@ -56,6 +56,26 @@ impl Genotype {
         }
         return word;
     }
+
+    pub fn get_as_delivery_str(&self) -> Vec<Vec<i32>>{
+        let mut res = Vec::new();
+        let mut tmp_vec = Vec::new();
+        for s in &self.stops{
+            match s {
+                NurseStop::Patient(p_num) => {
+                    tmp_vec.push(p_num.clone());
+                }
+                NurseStop::Depot => {
+                    res.push(tmp_vec.clone());
+                    tmp_vec.clear()
+                }
+            }
+        }
+        res.push(tmp_vec.clone());
+        // return String::from(res)
+        // println!("{:?}", res)
+        return res;
+    }
 }
 
 impl Eq for Genotype {}
@@ -181,16 +201,26 @@ pub fn calculate_and_set_travel_time(env: &EnvPruned, genotype: &mut Genotype) {
                 nurse_time += travel_to_time;
 
                 // check care time and wait if neccecery
-                if (nurse_time + patient.care_time as f32) > patient.end_time as f32 {
-                    // the stop is invalid
-                    valid = false;
-                    penalty += penalty_add;
-                }
-
                 if nurse_time < patient.start_time as f32 {
                     // the nurse has to wait until the start time
                     nurse_time = patient.start_time as f32;
                 }
+
+                // println!("{:?}",nurse_time + patient.care_time as f32);
+                // println!("{:?}",patient.end_time);
+                // println!("{:?}",(nurse_time + patient.care_time as f32) > patient.end_time as f32);
+                // println!();
+
+                // println!("{:?}",)
+                if (nurse_time + patient.care_time as f32) > patient.end_time as f32 {
+                    // the stop is invalid
+                    valid = false;
+                    penalty += penalty_add;
+                } else {
+                    nurse_time += patient.care_time as f32;
+                }
+
+
 
                 // validate the care strain
                 nurse_strain += patient.demand;
@@ -224,10 +254,19 @@ pub fn calculate_and_set_travel_time(env: &EnvPruned, genotype: &mut Genotype) {
             }
         }
     }
+    let travel_to_time = env.get_travel_time_between(&prev_stop_id, &0);
+    total_travel_time += travel_to_time;
+    nurse_time += travel_to_time;
+    if nurse_time > env.depo_ret_time as f32 {
+        // the nurse route is invalid
+        valid = false;
+        penalty += penalty_add;
+    }
 
     genotype.travel_time = Option::from(total_travel_time * penalty);
     genotype.valid = Option::from(valid);
 }
+
 
 pub fn calculate_and_set_travel_time_multiple(env: &EnvPruned, genotypes: &mut Vec<Genotype>) {
     for gt in genotypes {

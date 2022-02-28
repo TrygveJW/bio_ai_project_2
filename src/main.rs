@@ -10,10 +10,7 @@ use std::time::Duration;
 
 use rand::Rng;
 
-use crate::genalg::{
-    calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity,
-    generate_random_genome, Genotype, mutate, partially_mapped_crossover,
-};
+use crate::genalg::{calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity, generate_random_genome, Genotype, mutate, partially_mapped_crossover};
 use crate::selection::{
     elitism_parent_selection, elitism_survivor_selection, random_best_half_parent_selection,
     tournament_parent_selection, tournament_pick, tournament_surivor_selection,
@@ -180,7 +177,7 @@ pub fn gen_alg_worker(
 
     if explore {
         mutation_rate_delta += 0.3;
-        mutation_rate_secondary_delta += 0.4;
+        // mutation_rate_secondary_delta += 0.4;
 
         config.crossover_chance = 0.4;
         // config.children_per_parent_pair += 2;
@@ -294,7 +291,7 @@ pub fn gen_alg_worker(
 
         // -- parent selection -- //
 
-        let parent_pairs = tournament_parent_selection(&population, config.num_parent_pairs as i32, 100, true);
+        let parent_pairs = tournament_parent_selection(&population, config.num_parent_pairs as i32, 50, true);
 
         // let parent_pairs = if explore{
         //     // population.iter().for_each(|a| println!("{:?}", a.travel_time))
@@ -436,29 +433,30 @@ pub fn gen_alg_worker(
 
 fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     /*
-    1 - N
-    2 - N
-    3 - OK
-    4 - OK
-    5 - OK, ish
-    6 - OK
-    7 - OK, ish
-    8 - OK, ish
-    9 - OK, ish
+    0 - OK 828
+    1 - N 672
+    2 - OK 1688
+    3 -
+    4 -
+    5 -
+    6 -
+    7 -
+    8 -
+    9 -
      */
     let cnfg = GenAlgConfig {
-        train_set: 9,
-        pop_size: 500,
-        children_per_parent_pair: 10,
-        num_parent_pairs: 50,
-        train_iterations: 10000000,
+        train_set: 1,
+        pop_size: 200,
+        children_per_parent_pair: 30,
+        num_parent_pairs: 20,
+        train_iterations: 100000,
         crowding: true,
         crossover_chance: 0.4,
         mutation_chance: 0.6,
         next_mut_chance: 0.0,
         early_stop_after: 10000,
 
-        cross_per: 300,
+        cross_per: 400,
         cross_num: 100,
     };
     let (best_sender, best_receiver) = mpsc::channel::<NewBestMsg>();
@@ -516,7 +514,7 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     let print_handle = thread::spawn(move || {
         let mut best_genome = Option::None;
         let mut best_hist = Vec::new();
-        let dur = Duration::from_secs(60);
+        let dur = Duration::from_secs(20);
         loop {
             let rec_res = best_receiver.recv_timeout(*&dur);
             match rec_res {
@@ -551,14 +549,28 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
 fn main() {
     let run_1_res = run_genalg(Option::None);
 
-    let run_2_res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
+    let mut gen = run_1_res.get(run_1_res.len()-1).unwrap();
+    println!("DELIVERY:");
+    println!("score: {:}",gen.travel_time.unwrap());
+    println!("valid: {:}",gen.valid.unwrap());
+    println!("as delivery string: {:?}",gen.get_as_delivery_str() );
+    // let run_2_res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
 
-    // let environment = get_train_sett(1);
+
+    // let environment = get_train_sett(3);
+
+
+    // let environment = get_train_sett(3);
+    //
+    //
+    // println!("as delivery string: {:?}",environment.patients.get(42-1).unwrap());
+    // // println!("as delivery string: {:?}",environment.get_travel_time_between(&31, &6) );
     //
     // let mut population: Vec<Genotype> = Vec::with_capacity(10);
     // population.append(&mut generate_random_genome(
     //     &environment,
     //     500,
     // ));
+    // population.get(0).unwrap().get_as_delivery_str();
     // calculate_pop_diversity(&population,&environment)
 }
