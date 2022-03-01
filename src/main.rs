@@ -2,21 +2,27 @@
 
 extern crate core;
 
+use std::borrow::BorrowMut;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver,  Sender };
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use itertools::{iterate, Itertools};
 
 use rand::Rng;
+use crate::crossover::{edge_crossover, partially_mapped_crossover};
 
-use crate::genalg::{calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity, generate_random_genome, Genotype, mutate, partially_mapped_crossover};
+use crate::genalg::{calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity, generate_random_genome, Genotype};
+use crate::mutation::{brute_f_seg, mutate};
 use crate::selection::{elitism_parent_selection, elitism_survivor_selection, random_best_half_parent_selection, rank_parent_selection, tournament_parent_selection, tournament_pick, tournament_surivor_selection};
 use crate::train_data_parsing::{EnvPruned, get_train_sett};
 
 mod genalg;
 mod selection;
 mod train_data_parsing;
+mod crossover;
+mod mutation;
 
 /*
 
@@ -77,24 +83,33 @@ fn gen_child(
     environment: &EnvPruned,
     mut_1_delta: f32,
     mut_2_delta: f32,
+    itr: i32
 ) -> Genotype {
     let mut rng = rand::thread_rng();
     // recombination
-    let mut child = if parent_1.cross_rate > rng.gen::<f32>() {
-        match rand::random::<bool>() {
-            true => partially_mapped_crossover(parent_1, parent_2),
-            false => partially_mapped_crossover(parent_2, parent_1),
+    let mut child = if config.crossover_chance > rng.gen::<f32>() {
+
+        if rand::random::<bool>() {
+            match rand::random::<bool>() {
+                true => partially_mapped_crossover(parent_1, parent_2),
+                false => partially_mapped_crossover(parent_2, parent_1),
+            }
+        } else {
+            match rand::random::<bool>() {
+                true => edge_crossover(parent_1, parent_2),
+                false => edge_crossover(parent_2, parent_1),
+            }
         }
     } else {
         match rand::random::<bool>() {
-            true => Genotype::new(parent_1.stops.clone(),parent_1.mut_rate, parent_1.cross_rate),
-            false => Genotype::new(parent_2.stops.clone(), parent_2.mut_rate, parent_2.cross_rate),
+            true => Genotype::new(parent_1.stops.clone(), parent_1.meta_genes.clone()),
+            false => Genotype::new(parent_2.stops.clone(), parent_2.meta_genes.clone()),
         }
     };
-    if (child.mut_rate + mut_1_delta) > rng.gen::<f32>() {
-        mutate(&mut child);
+    if (child.meta_genes.mut_rate + mut_1_delta) > rng.gen::<f32>() {
+        mutate(&mut child, environment, itr);
         while (config.next_mut_chance + mut_2_delta) > rng.gen::<f32>() {
-            mutate(&mut child);
+            mutate(&mut child, environment, itr);
         }
     }
     calculate_and_set_travel_time(&environment, &mut child);
@@ -176,9 +191,9 @@ pub fn gen_alg_worker(
 
     if explore {
         mutation_rate_delta += 0.3;
-        // mutation_rate_secondary_delta += 0.4;
+        mutation_rate_secondary_delta += 0.4;
 
-        config.crossover_chance = 0.4;
+        // config.crossover_chance = 0.4;
         // config.children_per_parent_pair += 2;
         // config.num_parent_pairs += 20;
         // config.pop_size += 200;
@@ -292,7 +307,9 @@ pub fn gen_alg_worker(
 
         // -- parent selection -- //
 
+        // population.sort();
         let parent_pairs = tournament_parent_selection(&population, config.num_parent_pairs as i32, 30, true);
+        // let parent_pairs = rank_parent_selection(&population, config.num_parent_pairs as i32);
 
         // let parent_pairs = if explore{
         //     // population.iter().for_each(|a| println!("{:?}", a.travel_time))
@@ -322,6 +339,7 @@ pub fn gen_alg_worker(
                         &environment,
                         mutation_rate_delta,
                         mutation_rate_secondary_delta,
+                        iteration as i32
                     );
                     competition_pop.push(child)
                 }
@@ -370,6 +388,7 @@ pub fn gen_alg_worker(
                         &environment,
                         mutation_rate_delta,
                         mutation_rate_secondary_delta,
+                        iteration as i32
                     );
                     children.push(child)
                 }
@@ -437,18 +456,18 @@ pub fn gen_alg_worker(
 fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     /*
     0 - OK 828
-    1 - N 633
+    1 - OK 591
     2 - OK 1688
     3 -
     4 -
     5 -
-    6 - N
+    6 - N 847
     7 - OK 1190
     8 - N
     9 - N 880
      */
     let cnfg = GenAlgConfig {
-        train_set: 6,
+        train_set: 2,
         pop_size: 300,
         children_per_parent_pair: 30,
         num_parent_pairs: 30,
@@ -457,7 +476,7 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
         crossover_chance: 0.0,
         mutation_chance: 0.0,
         next_mut_chance: 0.0,
-        early_stop_after: 50000,
+        early_stop_after: 10000,
 
         cross_per: 200,
         cross_num: 100,
@@ -467,7 +486,7 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     let mut handles = Vec::new();
 
     // let num_threads = std::thread::available_parallelism().unwrap().get() as i32;
-    let num_threads = 10;
+    let num_threads = 8;
 
     let mut round_coms = Vec::new();
 
@@ -509,23 +528,23 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
         let r = tr_coms.receive.unwrap();
 
         let mut rng = rand::thread_rng();
-        let tr_cfg = GenAlgConfig {
-            train_set: cnfg.train_set,
-            pop_size: rng.gen_range(50..500),
-            children_per_parent_pair: rng.gen_range(1..100),
-            num_parent_pairs: rng.gen_range(2..100),
-            train_iterations: cnfg.train_iterations,
-            crowding: rand::random::<bool>(),
-            crossover_chance: 0.0,
-            mutation_chance: 0.0,
-            next_mut_chance: 0.0,
-            early_stop_after: 100000,
+        // let tr_cfg = GenAlgConfig {
+        //     train_set: cnfg.train_set,
+        //     pop_size: rng.gen_range(50..500),
+        //     children_per_parent_pair: rng.gen_range(1..100),
+        //     num_parent_pairs: rng.gen_range(2..100),
+        //     train_iterations: cnfg.train_iterations,
+        //     crowding: rand::random::<bool>(),
+        //     crossover_chance: 0.0,
+        //     mutation_chance: 0.0,
+        //     next_mut_chance: 0.0,
+        //     early_stop_after: 100000,
+        //
+        //     cross_per: 200,
+        //     cross_num: 100,
+        // };
 
-            cross_per: 200,
-            cross_num: 100,
-        };
-
-        let h = start_worker(&best_sender.to_owned(), &tr_cfg, s, r, tr_coms.idx, spk);
+        let h = start_worker(&best_sender.to_owned(), &cnfg, s, r, tr_coms.idx, spk);
         handles.push(h);
     }
 
@@ -589,6 +608,8 @@ fn main() {
     println!("valid: {:}",gen.valid.unwrap());
     println!("as str: {:?}",gen);
     println!("as delivery string: {:?}",gen.get_as_delivery_str() );
+
+
     // let run_2_res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
 
 
@@ -604,8 +625,20 @@ fn main() {
     // let mut population: Vec<Genotype> = Vec::with_capacity(10);
     // population.append(&mut generate_random_genome(
     //     &environment,
-    //     500,
+    //     10,
     // ));
+    // for mut g in population.iter_mut(){
+    //     brute_f_seg(   g, &environment)
+    // }
+
+    // let a = (0..5);
+    //
+    // for nl in a.permutations(5){
+    //
+    //     println!("{:?}", nl);
+    // }
+
+
     // population.get(0).unwrap().get_as_delivery_str();
     // calculate_pop_diversity(&population,&environment)
 }

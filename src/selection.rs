@@ -114,10 +114,16 @@ pub fn rank_parent_selection(
     let dist = WeightedIndex::new(&weights).unwrap();
     let mut parent_pairs: Vec<(&Genotype, &Genotype)> = Vec::new();
 
-    for _ in 0..num_parents {
+    // let mut used = Vec::new();
+    while parent_pairs.len()< num_parents as usize {
+
         let p1 = population.get(dist.sample(&mut rng)).unwrap();
         let p2 = population.get(dist.sample(&mut rng)).unwrap();
-        parent_pairs.push((p1, p2))
+        // if p1 != p2 && !used.contains(&p1) && !used.contains(&p2){
+            parent_pairs.push((p1, p2));
+        //     used.push(&p1);
+        //     used.push(&p2);
+        // }
         // println!("{:?}",p1);
         // println!("{:?}",v1);
     }
