@@ -11,10 +11,7 @@ use std::time::Duration;
 use rand::Rng;
 
 use crate::genalg::{calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity, generate_random_genome, Genotype, mutate, partially_mapped_crossover};
-use crate::selection::{
-    elitism_parent_selection, elitism_survivor_selection, random_best_half_parent_selection,
-    tournament_parent_selection, tournament_pick, tournament_surivor_selection,
-};
+use crate::selection::{elitism_parent_selection, elitism_survivor_selection, random_best_half_parent_selection, rank_parent_selection, tournament_parent_selection, tournament_pick, tournament_surivor_selection};
 use crate::train_data_parsing::{EnvPruned, get_train_sett};
 
 mod genalg;
@@ -41,7 +38,7 @@ mutation rate som en av genome paraman som blir mutert??
 
  */
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct GenAlgConfig {
     train_set: i32,
     pop_size: usize,
@@ -64,7 +61,9 @@ pub struct GenAlgConfig {
 }
 
 pub struct NewBestMsg {
+    is_done: bool,
     best_genome: Genotype,
+    best_cnfg: GenAlgConfig,
     itr: i32,
     thread_nmr: i32,
     s_div: f32,
@@ -81,18 +80,18 @@ fn gen_child(
 ) -> Genotype {
     let mut rng = rand::thread_rng();
     // recombination
-    let mut child = if config.crossover_chance > rng.gen::<f32>() {
+    let mut child = if parent_1.cross_rate > rng.gen::<f32>() {
         match rand::random::<bool>() {
             true => partially_mapped_crossover(parent_1, parent_2),
             false => partially_mapped_crossover(parent_2, parent_1),
         }
     } else {
         match rand::random::<bool>() {
-            true => Genotype::new(parent_1.stops.clone()),
-            false => Genotype::new(parent_2.stops.clone()),
+            true => Genotype::new(parent_1.stops.clone(),parent_1.mut_rate, parent_1.cross_rate),
+            false => Genotype::new(parent_2.stops.clone(), parent_2.mut_rate, parent_2.cross_rate),
         }
     };
-    if (config.mutation_chance + mut_1_delta) > rng.gen::<f32>() {
+    if (child.mut_rate + mut_1_delta) > rng.gen::<f32>() {
         mutate(&mut child);
         while (config.next_mut_chance + mut_2_delta) > rng.gen::<f32>() {
             mutate(&mut child);
@@ -140,7 +139,7 @@ struct RoundRobinComs {
 }
 
 fn start_worker(
-    best_sender: &Sender<NewBestMsg>,
+    best_sender: &Sender<Option<NewBestMsg>>,
     config: &GenAlgConfig,
     round_send: Sender<Vec<Genotype>>,
     round_receive: Receiver<Vec<Genotype>>,
@@ -157,7 +156,7 @@ fn start_worker(
 
 pub fn gen_alg_worker(
     mut config: GenAlgConfig,
-    send_channel: Sender<NewBestMsg>,
+    send_channel: Sender<Option<NewBestMsg>>,
     tr_num: i32,
     cross_b_sender: Sender<Vec<Genotype>>,
     cross_b_reciver: Receiver<Vec<Genotype>>,
@@ -274,13 +273,15 @@ pub fn gen_alg_worker(
             let pop_sdiv = std_deviation(&a).unwrap();
             let pop_entropy = calculate_pop_diversity(&used_pop, &environment);
             let msg = NewBestMsg {
+                best_cnfg: config.clone(),
                 s_div: pop_sdiv,
                 best_genome: used_pop.get(0).unwrap().clone(),
                 itr: iteration.clone() as i32,
                 thread_nmr: tr_num.clone(),
                 pop_entropy,
+                is_done: false
             };
-            send_channel.send(msg);
+            send_channel.send(Option::from(msg));
             // send_channel.send(population.get(0).unwrap().clone());
             // println!("new best travel time {:?} at round {}", population.get(0).unwrap().travel_time.unwrap(), iteration);
             round_since_improve = 0;
@@ -291,20 +292,20 @@ pub fn gen_alg_worker(
 
         // -- parent selection -- //
 
-        let parent_pairs = tournament_parent_selection(&population, config.num_parent_pairs as i32, 50, true);
+        let parent_pairs = tournament_parent_selection(&population, config.num_parent_pairs as i32, 30, true);
 
         // let parent_pairs = if explore{
         //     // population.iter().for_each(|a| println!("{:?}", a.travel_time))
-        //     // elitism_parent_selection(&population, config.num_parent_pairs as i32)
+        //     elitism_parent_selection(&population, config.num_parent_pairs as i32)
         //     // let parent_pairs = rank_parent_selection(&population, config.num_parent_pairs as i32)
         //     // random_best_half_parent_selection(&population, config.num_parent_pairs as i32)
-        //     tournament_parent_selection(&population, config.num_parent_pairs as i32, 150, false)
+        //     // tournament_parent_selection(&population, config.num_parent_pairs as i32, 30, true)
         // } else {
         //     // population.iter().for_each(|a| println!("{:?}", a.travel_time));
         //     // elitism_parent_selection(&population, config.num_parent_pairs as i32)
-        //     // let parent_pairs = rank_parent_selection(&population, config.num_parent_pairs as i32);
-        //     // let parent_pairs = random_best_half_parent_selection(&population, config.num_parent_pairs as i32);
-        //     tournament_parent_selection(&population, config.num_parent_pairs as i32, 100, false)
+        //     // rank_parent_selection(&population, config.num_parent_pairs as i32)
+        //     // random_best_half_parent_selection(&population, config.num_parent_pairs as i32)
+        //     tournament_parent_selection(&population, config.num_parent_pairs as i32, 30, false)
         // };
         // let parent_iter = parent_pairs.iter()
 
@@ -357,6 +358,7 @@ pub fn gen_alg_worker(
                 calculate_and_set_travel_time_multiple(&environment, &mut new);
                 population.append(&mut new)
             }
+
             // println!("{:?}",population.len())
         } else {
             for (parent_1, parent_2) in parent_pairs {
@@ -390,7 +392,7 @@ pub fn gen_alg_worker(
 
             if explore {
                 population = elitism_survivor_selection(population, &config.pop_size);
-                // population = tournament_surivor_selection(population, &config.pop_size, &10, &false);
+                // population = tournament_surivor_selection(population, &config.pop_size, &50, &false);
             } else {
                 // population = elitism_survivor_selection(population, &config.pop_size);
                 population =
@@ -427,6 +429,7 @@ pub fn gen_alg_worker(
         "current best 3 is {:?}",
         population.get(2).unwrap().get_as_word()
     );
+    send_channel.send(Option::None);
 
     // calculate_pop_diversity(&population,&environment)
 }
@@ -434,32 +437,32 @@ pub fn gen_alg_worker(
 fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     /*
     0 - OK 828
-    1 - N 672
+    1 - N 633
     2 - OK 1688
     3 -
     4 -
     5 -
-    6 -
-    7 -
-    8 -
-    9 -
+    6 - N
+    7 - OK 1190
+    8 - N
+    9 - N 880
      */
     let cnfg = GenAlgConfig {
-        train_set: 1,
-        pop_size: 200,
+        train_set: 6,
+        pop_size: 300,
         children_per_parent_pair: 30,
-        num_parent_pairs: 20,
-        train_iterations: 100000,
+        num_parent_pairs: 30,
+        train_iterations: 10000000,
         crowding: true,
-        crossover_chance: 0.4,
-        mutation_chance: 0.6,
+        crossover_chance: 0.0,
+        mutation_chance: 0.0,
         next_mut_chance: 0.0,
-        early_stop_after: 10000,
+        early_stop_after: 50000,
 
-        cross_per: 400,
+        cross_per: 200,
         cross_num: 100,
     };
-    let (best_sender, best_receiver) = mpsc::channel::<NewBestMsg>();
+    let (best_sender, best_receiver) = mpsc::channel::<Option<NewBestMsg>>();
 
     let mut handles = Vec::new();
 
@@ -505,36 +508,67 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
         let s = tr_coms.send.unwrap();
         let r = tr_coms.receive.unwrap();
 
-        let h = start_worker(&best_sender.to_owned(), &cnfg, s, r, tr_coms.idx, spk);
+        let mut rng = rand::thread_rng();
+        let tr_cfg = GenAlgConfig {
+            train_set: cnfg.train_set,
+            pop_size: rng.gen_range(50..500),
+            children_per_parent_pair: rng.gen_range(1..100),
+            num_parent_pairs: rng.gen_range(2..100),
+            train_iterations: cnfg.train_iterations,
+            crowding: rand::random::<bool>(),
+            crossover_chance: 0.0,
+            mutation_chance: 0.0,
+            next_mut_chance: 0.0,
+            early_stop_after: 100000,
+
+            cross_per: 200,
+            cross_num: 100,
+        };
+
+        let h = start_worker(&best_sender.to_owned(), &tr_cfg, s, r, tr_coms.idx, spk);
         handles.push(h);
     }
 
     let (ret_s, ret_r) = mpsc::channel::<Vec<Genotype>>();
 
+    let tr_count = num_threads.clone();
     let print_handle = thread::spawn(move || {
         let mut best_genome = Option::None;
+        let mut best_cnfg = Option::None;
         let mut best_hist = Vec::new();
         let dur = Duration::from_secs(20);
+        let mut num_hot = tr_count;
         loop {
-            let rec_res = best_receiver.recv_timeout(*&dur);
+            let rec_res = best_receiver.recv();
             match rec_res {
-                Ok(msg) => {
-                    let r = msg.best_genome;
+                Ok(opt) => {
+                    match opt {
+                        None => {
+                            num_hot -= 1
+                        }
+                        Some(msg) => {
+                            let r = msg.best_genome;
 
-                    let best = best_genome.get_or_insert(r.clone());
-                    if r.travel_time < best.travel_time {
-                        println!("new best travel time {:>8.3}, valid {:>6}, thread: {:>3}, local itr: {:>6}, tr std: {:<10.3}, entropy: {:.4} ", r.travel_time.unwrap(), r.valid.unwrap(), msg.thread_nmr, msg.itr, msg.s_div, msg.pop_entropy);
-                        best_hist.push(r.clone());
-                        best_genome.insert(r);
+                            let best = best_genome.get_or_insert(r.clone());
+                            if r.travel_time < best.travel_time {
+                                best_cnfg.insert( msg.best_cnfg);
+                                println!("new best travel time {:>8.3}, valid {:>6}, thread: {:>3}, local itr: {:>6}, tr std: {:<10.3}, entropy: {:.4} ", r.travel_time.unwrap(), r.valid.unwrap(), msg.thread_nmr, msg.itr, msg.s_div, msg.pop_entropy);
+                                best_hist.push(r.clone());
+                                best_genome.insert(r);
+                            }
+                        }
                     }
+
                 }
                 Err(_) => {
-                    ret_s.send(best_hist);
-                    break
                 }
             }
+            if num_hot == 0{
+                ret_s.send(best_hist);
+                println!("{:?}", best_cnfg.unwrap());
+                break
+            }
         }
-        println!("AAAAAAAAAAAAAAAAAAAAAAA")
     });
 
     let best_h = ret_r.recv().unwrap();
@@ -553,6 +587,7 @@ fn main() {
     println!("DELIVERY:");
     println!("score: {:}",gen.travel_time.unwrap());
     println!("valid: {:}",gen.valid.unwrap());
+    println!("as str: {:?}",gen);
     println!("as delivery string: {:?}",gen.get_as_delivery_str() );
     // let run_2_res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
 

@@ -20,14 +20,18 @@ pub enum NurseStop {
 #[derive(Debug, Clone)]
 pub struct Genotype {
     pub stops: Vec<NurseStop>,
+    pub mut_rate: f32,
+    pub cross_rate: f32,
 
     pub travel_time: Option<f32>,
     pub valid: Option<bool>,
 }
 
 impl Genotype {
-    pub fn new(nurse_stop: Vec<NurseStop>) -> Genotype {
+    pub fn new(nurse_stop: Vec<NurseStop>, mut_r:f32, cross_r:f32) -> Genotype {
         return Genotype {
+            mut_rate: mut_r,
+            cross_rate: cross_r,
             stops: nurse_stop,
             travel_time: Option::None,
             valid: Option::None,
@@ -295,7 +299,7 @@ pub fn generate_random_genome(env: &EnvPruned, pop_size: i32) -> Vec<Genotype> {
         }
 
         chromosome.shuffle(&mut rng);
-        ret.push(Genotype::new(chromosome));
+        ret.push(Genotype::new(chromosome,rand::random::<f32>(),rand::random::<f32>()));
     }
 
     return ret;
@@ -320,7 +324,22 @@ fn get_rand_range(max: usize) -> (usize, usize) {
 pub fn mutate(genome: &mut Genotype) {
     let mut rng = rand::thread_rng();
 
-    match rng.gen_range(0..4) {
+    if rand::random::<f32>() > genome.mut_rate{
+        let delta = match rng.gen_range::<i32,_>((0..3)) {
+            0 => 0.8,
+            1 => 1.0,
+            2 => 1.2,
+            _ => 0.0,
+        };
+
+        match rng.gen_range::<i32,_>(0..3) {
+            0 => {genome.cross_rate *= delta},
+            1 => {genome.mut_rate *= delta},
+            _ => {}
+        }
+    }
+
+    match rng.gen_range::<i32,_>(0..4) {
         0 => swap_mutate(genome),
         1 => insert_mutate(genome),
         2 => scramble_mutate(genome),
@@ -385,7 +404,7 @@ pub fn inverse_mutation(genome: &mut Genotype) {
 pub fn partially_mapped_crossover(parent1: &Genotype, parent2: &Genotype) -> Genotype {
     let (point_1, point_2) = get_rand_range(parent1.stops.len());
 
-    let mut child = Genotype::new(parent2.stops.clone());
+    let mut child = Genotype::new(parent2.stops.clone(), parent1.mut_rate, parent2.cross_rate);
     child.stops[point_1..point_2].clone_from_slice(&parent1.stops[point_1..point_2]);
 
     let p1_slice = &parent1.stops[point_1..point_2];
@@ -438,69 +457,69 @@ pub fn partially_mapped_crossover(parent1: &Genotype, parent2: &Genotype) -> Gen
 
     return child;
 }
-
-fn find_next_depo_index() {}
-
-pub fn pmx_modified(parent1: &Genotype, parent2: &Genotype) -> Genotype {
-    let (point_1, point_2) = get_rand_range(parent1.stops.len());
-
-    /*
-    1. pick random spot
-    2. advance until next route start (depo) is found
-        - if same depo as pick 1 or at end pick again
-    3. pick random slice of route to copy
-    4. pick new random spot to insert the route slice
-     */
-    let mut child = Genotype::new(parent2.stops.clone());
-    child.stops[point_1..point_2].clone_from_slice(&parent1.stops[point_1..point_2]);
-
-    let p1_slice = &parent1.stops[point_1..point_2];
-    let mut p1_vec = parent1.stops[point_1..point_2].to_vec();
-    let p2_slice = &parent2.stops[point_1..point_2];
-    let mut p2_vec = parent2.stops[point_1..point_2].to_vec();
-
-    let mut fill_stops = Vec::new();
-    let mut remove_stops = Vec::new();
-
-    for stop in p1_slice {
-        let pos = p2_vec.iter().position(|v| *v == *stop);
-        match pos {
-            Some(index) => {
-                p2_vec.remove(index);
-            }
-            None => {
-                remove_stops.push(stop.clone());
-            }
-        }
-    }
-
-    for stop in p2_slice {
-        let pos = p1_vec.iter().position(|v| *v == *stop);
-        match pos {
-            Some(index) => {
-                p1_vec.remove(index);
-            }
-            None => {
-                fill_stops.push(stop.clone());
-            }
-        }
-    }
-
-    for mut n in 0..child.stops.len() {
-        let curr_stop = child.stops.get(n).unwrap();
-
-        let pos = remove_stops.iter().position(|rm_pos| rm_pos == curr_stop);
-        match pos {
-            Some(idx) => {
-                // println!(" fill stops {:?}", fill_stops);
-                // println!(" rem stops {:?}", remove_stops);
-                child.stops.push(fill_stops.pop().unwrap());
-                child.stops.swap_remove(n);
-                remove_stops.remove(idx);
-            }
-            None => {}
-        }
-    }
-
-    return child;
-}
+//
+// fn find_next_depo_index() {}
+//
+// pub fn pmx_modified(parent1: &Genotype, parent2: &Genotype) -> Genotype {
+//     let (point_1, point_2) = get_rand_range(parent1.stops.len());
+//
+//     /*
+//     1. pick random spot
+//     2. advance until next route start (depo) is found
+//         - if same depo as pick 1 or at end pick again
+//     3. pick random slice of route to copy
+//     4. pick new random spot to insert the route slice
+//      */
+//     let mut child = Genotype::new(parent2.stops.clone());
+//     child.stops[point_1..point_2].clone_from_slice(&parent1.stops[point_1..point_2]);
+//
+//     let p1_slice = &parent1.stops[point_1..point_2];
+//     let mut p1_vec = parent1.stops[point_1..point_2].to_vec();
+//     let p2_slice = &parent2.stops[point_1..point_2];
+//     let mut p2_vec = parent2.stops[point_1..point_2].to_vec();
+//
+//     let mut fill_stops = Vec::new();
+//     let mut remove_stops = Vec::new();
+//
+//     for stop in p1_slice {
+//         let pos = p2_vec.iter().position(|v| *v == *stop);
+//         match pos {
+//             Some(index) => {
+//                 p2_vec.remove(index);
+//             }
+//             None => {
+//                 remove_stops.push(stop.clone());
+//             }
+//         }
+//     }
+//
+//     for stop in p2_slice {
+//         let pos = p1_vec.iter().position(|v| *v == *stop);
+//         match pos {
+//             Some(index) => {
+//                 p1_vec.remove(index);
+//             }
+//             None => {
+//                 fill_stops.push(stop.clone());
+//             }
+//         }
+//     }
+//
+//     for mut n in 0..child.stops.len() {
+//         let curr_stop = child.stops.get(n).unwrap();
+//
+//         let pos = remove_stops.iter().position(|rm_pos| rm_pos == curr_stop);
+//         match pos {
+//             Some(idx) => {
+//                 // println!(" fill stops {:?}", fill_stops);
+//                 // println!(" rem stops {:?}", remove_stops);
+//                 child.stops.push(fill_stops.pop().unwrap());
+//                 child.stops.swap_remove(n);
+//                 remove_stops.remove(idx);
+//             }
+//             None => {}
+//         }
+//     }
+//
+//     return child;
+// }
