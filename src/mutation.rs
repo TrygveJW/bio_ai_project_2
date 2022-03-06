@@ -36,7 +36,7 @@ impl MetaGenes {
        return MetaGenes{
            cross_rate: rand::random(),
            mut_rate: rand::random(),
-           mut_weight_vec: std::iter::repeat(1).take(5).collect(),
+           mut_weight_vec: std::iter::repeat(1).take(6).collect(),
        };
     }
 
@@ -85,18 +85,20 @@ pub fn mutate(genome: &mut Genotype, env: &EnvPruned, itr: i32) {
     };
 
     let to: usize = if itr > 10000{
-        5
+        6
     }else {
-        4
+        5
     };
 
     let val = rng.gen_range(0..to);//dist.sample(&mut rng);
+    // let val = dist.sample(&mut rng);
     match val{
         0 => swap_mutate(genome),
         1 => insert_mutate(genome),
         2 => scramble_mutate(genome),
         3 => inverse_mutation(genome),
-        4 => brute_f_seg(genome,env),
+        4 => move_seq_mutation(genome),
+        5 => brute_f_seg(genome,env),
         _ => {
             panic!("invalid mut")
         }
@@ -140,15 +142,62 @@ pub fn scramble_mutate(genome: &mut Genotype) {
     // return genome;
 }
 
+/// Mutate genome by selecting a sub sequence and reversing it
 pub fn inverse_mutation(genome: &mut Genotype) {
     // -> Genotype{
     let mut rng = rand::thread_rng();
 
     let (point_1, point_2) = get_rand_range(genome.stops.len());
 
+
     genome.stops[point_1..point_2].reverse();
     // return genome;
 }
+
+/// Mutate the genome by selecting a sub sequence and moving it
+pub fn move_seq_mutation(genome: &mut Genotype){
+    let (point_1, point_2) = get_rand_range(genome.stops.len());
+    let mut rng = rand::thread_rng();
+
+
+    // let seq = genome.stops.take(point_1..point_2).unwrap();
+    let mut seq: Vec<_> = genome.stops.drain(point_1..point_2).collect();
+
+    let drop_at: usize = rng.gen_range(0..(genome.stops.len()));
+
+    let mut snip = genome.stops.split_off(drop_at);
+    // genome.stops.extend_from_slice(seq);
+    genome.stops.append(&mut seq);
+    genome.stops.append(&mut snip);
+}
+
+pub fn insert_optimal_mutate(genome: &mut Genotype, env: &EnvPruned) {
+    // -> Genotype{
+    let mut rng = rand::thread_rng();
+
+    let take: usize = rng.gen_range(0..genome.stops.len());
+
+    // let val = genome.stops.remove(take);
+
+    // genome.stops.swap(0,take);
+    let last = take;
+    let mut best_idx = take;
+    let mut best_travel_t = genome.travel_time.clone();
+    for n in (0..genome.stops.len()){
+        genome.stops.swap(last, n);
+        calculate_and_set_travel_time(env,genome);
+        if genome.travel_time < best_travel_t{
+            best_travel_t = genome.travel_time.clone()
+            best_idx = n
+        }
+
+
+        genome.stops.sw
+    }
+    genome.stops.insert(put, val);
+    // return genome;
+}
+
 
 fn get_seq_tt(seq: &Vec<&NurseStop>, env: &EnvPruned) -> f32{
 
@@ -172,7 +221,7 @@ fn get_seq_tt(seq: &Vec<&NurseStop>, env: &EnvPruned) -> f32{
 pub fn brute_f_seg(genome: &mut Genotype, env: &EnvPruned){
     let mut rng = rand::thread_rng();
 
-    let num_to_bf = rng.gen_range(2..5);
+    let num_to_bf = rng.gen_range(2..=5);
 
     let mut bf_slice: Vec<NurseStop> = Vec::new();
     let mut start_p = 0;
@@ -186,7 +235,11 @@ pub fn brute_f_seg(genome: &mut Genotype, env: &EnvPruned){
             break
         }
     }
-    let mut best_s_time = 100000.0;//get_seq_tt(&bf_slice.iter().collect::<Vec<_>>(), env);
+    let mut tmp_genome = genome.clone();
+    if tmp_genome.travel_time.is_none(){
+        calculate_and_set_travel_time(&env, &mut tmp_genome)
+    }
+    let mut best_s_time = tmp_genome.travel_time.unwrap();
     let init_best = best_s_time.clone();
     let mut best_s: Option<Vec<NurseStop>> = Option::None;
 
@@ -195,7 +248,6 @@ pub fn brute_f_seg(genome: &mut Genotype, env: &EnvPruned){
     // println!("{:?}", best_s_time);
     // println!("{:?}", bf_slice.len());
 
-    let mut tmp_genome = genome.clone();
 
     for comb in bf_slice.iter().permutations(bf_slice.len()){
         // let comb_t = get_seq_tt(&comb,env);

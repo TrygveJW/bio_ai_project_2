@@ -18,6 +18,8 @@ pub enum NurseStop {
     Depot,
 }
 
+
+
 #[derive(Debug, Clone)]
 pub struct Genotype {
     pub stops: Vec<NurseStop>,

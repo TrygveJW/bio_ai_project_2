@@ -1,4 +1,5 @@
 #![feature(is_sorted)]
+#![feature(slice_take)]
 
 extern crate core;
 
@@ -11,7 +12,7 @@ use std::time::Duration;
 use itertools::{iterate, Itertools};
 
 use rand::Rng;
-use crate::crossover::{edge_crossover, partially_mapped_crossover};
+use crate::crossover::{edge_crossover, partially_mapped_crossover, simple_sub_path_crossover};
 
 use crate::genalg::{calculate_and_set_travel_time, calculate_and_set_travel_time_multiple, calculate_pop_diversity, generate_random_genome, Genotype};
 use crate::mutation::{brute_f_seg, mutate};
@@ -37,7 +38,7 @@ TODO:
 
 mutation rate som en av genome paraman som blir mutert??
 
-
+crossover som kopierer en bit av en path fra en node til samme node i parent 2
 
 
 
@@ -89,17 +90,21 @@ fn gen_child(
     // recombination
     let mut child = if config.crossover_chance > rng.gen::<f32>() {
 
-        if rand::random::<bool>() {
             match rand::random::<bool>() {
-                true => partially_mapped_crossover(parent_1, parent_2),
-                false => partially_mapped_crossover(parent_2, parent_1),
+                true => simple_sub_path_crossover(parent_1, parent_2),
+                false => simple_sub_path_crossover(parent_2, parent_1),
             }
-        } else {
-            match rand::random::<bool>() {
-                true => edge_crossover(parent_1, parent_2),
-                false => edge_crossover(parent_2, parent_1),
-            }
-        }
+        // if true{//rand::random::<bool>() || itr< 1000 {
+        //     match rand::random::<bool>() {
+        //         true => partially_mapped_crossover(parent_1, parent_2),
+        //         false => partially_mapped_crossover(parent_2, parent_1),
+        //     }
+        // } else {
+        //     match rand::random::<bool>() {
+        //         true => edge_crossover(parent_1, parent_2),
+        //         false => edge_crossover(parent_2, parent_1),
+        //     }
+        // }
     } else {
         match rand::random::<bool>() {
             true => Genotype::new(parent_1.stops.clone(), parent_1.meta_genes.clone()),
@@ -277,6 +282,7 @@ pub fn gen_alg_worker(
         let pop_best = population.get(0).unwrap().travel_time.unwrap();
         if pop_best < best {
             let used_pop = if crowd_fill > 0 {
+                // population.to_vec()
                 population[0..(population.len() - crowd_fill)]
                     .to_vec()
                     .to_owned()
@@ -457,36 +463,36 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
     /*
     0 - OK 828
     1 - OK 591
-    2 - OK 1688
-    3 -
-    4 -
-    5 -
-    6 - N 847
+    2 - OK 1679
+    3 - OK 1517
+    4 - N 1155
+    5 - N 1012
+    6 - N 815
     7 - OK 1190
-    8 - N
+    8 - N 1088
     9 - N 880
      */
     let cnfg = GenAlgConfig {
-        train_set: 2,
+        train_set: 9,
         pop_size: 300,
         children_per_parent_pair: 30,
         num_parent_pairs: 30,
         train_iterations: 10000000,
         crowding: true,
-        crossover_chance: 0.0,
-        mutation_chance: 0.0,
+        crossover_chance: 0.00,
+        mutation_chance: 0.00,
         next_mut_chance: 0.0,
-        early_stop_after: 10000,
+        early_stop_after: 5000,//0000,
 
-        cross_per: 200,
-        cross_num: 100,
+        cross_per: 500,//500,//200
+        cross_num: 10,//100
     };
     let (best_sender, best_receiver) = mpsc::channel::<Option<NewBestMsg>>();
 
     let mut handles = Vec::new();
 
-    // let num_threads = std::thread::available_parallelism().unwrap().get() as i32;
-    let num_threads = 8;
+    // let num_threads = std::thread::available_parallelism().unwrap().get();
+    let num_threads = 10;
 
     let mut round_coms = Vec::new();
 
@@ -528,21 +534,21 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
         let r = tr_coms.receive.unwrap();
 
         let mut rng = rand::thread_rng();
-        // let tr_cfg = GenAlgConfig {
-        //     train_set: cnfg.train_set,
-        //     pop_size: rng.gen_range(50..500),
-        //     children_per_parent_pair: rng.gen_range(1..100),
-        //     num_parent_pairs: rng.gen_range(2..100),
-        //     train_iterations: cnfg.train_iterations,
-        //     crowding: rand::random::<bool>(),
-        //     crossover_chance: 0.0,
-        //     mutation_chance: 0.0,
-        //     next_mut_chance: 0.0,
-        //     early_stop_after: 100000,
-        //
-        //     cross_per: 200,
-        //     cross_num: 100,
-        // };
+        let tr_cfg = GenAlgConfig {
+            train_set: cnfg.train_set,
+            pop_size: rng.gen_range(50..500),
+            children_per_parent_pair: rng.gen_range(1..100),
+            num_parent_pairs: rng.gen_range(2..100),
+            train_iterations: cnfg.train_iterations,
+            crowding: rand::random::<bool>(),
+            crossover_chance: 0.0,
+            mutation_chance: 0.0,
+            next_mut_chance: 0.0,
+            early_stop_after: 3000,
+
+            cross_per: rng.gen_range(10..1000),
+            cross_num: rng.gen_range(10..100),
+        };
 
         let h = start_worker(&best_sender.to_owned(), &cnfg, s, r, tr_coms.idx, spk);
         handles.push(h);
@@ -556,7 +562,7 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
         let mut best_cnfg = Option::None;
         let mut best_hist = Vec::new();
         let dur = Duration::from_secs(20);
-        let mut num_hot = tr_count;
+        let mut num_hot = tr_count+1;
         loop {
             let rec_res = best_receiver.recv();
             match rec_res {
@@ -584,7 +590,7 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
             }
             if num_hot == 0{
                 ret_s.send(best_hist);
-                println!("{:?}", best_cnfg.unwrap());
+                println!("best config {:?}", best_cnfg.unwrap());
                 break
             }
         }
@@ -602,12 +608,34 @@ fn run_genalg(spike: Option<Vec<Genotype>>) -> Vec<Genotype> {
 fn main() {
     let run_1_res = run_genalg(Option::None);
 
-    let mut gen = run_1_res.get(run_1_res.len()-1).unwrap();
+    let mut gen = run_1_res.last().unwrap();
     println!("DELIVERY:");
     println!("score: {:}",gen.travel_time.unwrap());
     println!("valid: {:}",gen.valid.unwrap());
     println!("as str: {:?}",gen);
     println!("as delivery string: {:?}",gen.get_as_delivery_str() );
+
+    // let mut best = gen.clone();
+    // loop{
+    //     let res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
+    //
+    //     let cand_gen = res.get(res.len()-1).unwrap();
+    //     let is_better = cand_gen.travel_time < best.travel_time;
+    //     println!("DELIVERY:");
+    //     println!("score: {:}",gen.travel_time.unwrap());
+    //     println!("valid: {:}",gen.valid.unwrap());
+    //     println!("as str: {:?}",gen);
+    //     println!("as delivery string: {:?}",gen.get_as_delivery_str() );
+    //     println!("###########################");
+    //     println!("is new best? {:?}",is_better);
+    //     println!("best? {:?}",  best);
+    //     println!("###########################");
+    //     println!();
+    //     if is_better{
+    //         best = cand_gen.clone();
+    //
+    //     }
+    // }
 
 
     // let run_2_res = run_genalg(Option::Some(run_1_res[(run_1_res.len()-10)..(run_1_res.len())].to_vec()));
@@ -627,8 +655,14 @@ fn main() {
     //     &environment,
     //     10,
     // ));
+    //
     // for mut g in population.iter_mut(){
-    //     brute_f_seg(   g, &environment)
+    //     println!();
+    //     let aaaa = g.get_as_word();
+    //     println!("{:?}", g.get_as_word());
+    //     brute_f_seg(   g, &environment);
+    //     println!("{:?}", g.get_as_word());
+    //     println!("{:?}", g.get_as_word()== aaaa);
     // }
 
     // let a = (0..5);
